@@ -166,13 +166,14 @@ server <- function(input, output, session) {
       updateSelectInput(session, "kitNumber", choices = c('Online'))
     } else {
       updateSelectInput(session, "kitNumber", choices = c('',1:21),
-                        selected = '')
+                        selected = )
     }
   })
   
   output$instructions <- renderUI({
     validate(need(input$kitNumber %in% c(1:21) | input$onlineParticipant == T, 'Please enter your kit number to continue'))
-    list(actionButton("startPractice", "Start Practice"))
+    list(p('On the next page, you will be presented with a series of three practice graphs.'),
+      actionButton("startPractice", "Start Practice"))
   })
   
   
