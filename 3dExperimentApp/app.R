@@ -1,5 +1,9 @@
 
 library(shiny)
+source('R/plot-code.R')
+graphData <- read.csv('Data/graphData.csv')
+printedKitInfo <- read.csv('Data/printedKitInfo.csv')
+practiceData <- read.csv('Data/practiceData.csv')
 
 
 ##### UI Pages #####
@@ -85,11 +89,28 @@ instructions <- fluidPage(
 )
 
 
-# In this survey, a series of graphs will be given to you. Each graph will have 10 bars; two of the bars will be identified with a circle and a triangle. First, we will ask you to identify which bar (circle or triangle) is smaller. Then, we will ask you to estimate the size of the smaller bar if the larger bar is 100 units tall.
-# 
-# In some cases, the graphs will be displayed on screen. In other cases, we will ask you to get one of the graphs from a ziploc bag you should have received before starting this study. For these 3D-printed graphs, we will ask you to tell us which graph you selected using the ID code engraved on the bottom of the chart.
-# 
-# The next screen will display a few sample graphs. The answers for each of these graphs are located underneath the sample.
+##### Practice #####
+
+practice <- fluidPage(
+  tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "styles.css")
+  ),
+  sidebarLayout(
+    sidebarPanel(
+      h2('Practice'),
+      radioButtons('practiceGraphs', 'Which marked bar is smaller?',
+                   c('Circle', 'Triangle'), selected = ''),
+      sliderInput('practiceEstimate', 'If the larger marked bar is 100 units tall, how tall is the smaller marked bar?',
+                  min = 0, max = 100, value = 50, step = 0.1, ticks = F),
+      actionButton('submitPractice', 'Submit')
+      
+    ),
+    mainPanel(
+      uiOutput('practiceGraphUI')
+    )
+  )
+)
+
 
 ##### UI Logic #####
 ui <- navbarPage(
@@ -98,6 +119,7 @@ ui <- navbarPage(
   tabPanel("Informed Consent", informed_consent),
   tabPanel("Demographics", demographic),
   tabPanel("Instructions", instructions),
+  tabPanel("Practice", practice),
   collapsible = TRUE
 )
 
@@ -106,7 +128,12 @@ server <- function(input, output, session) {
 
   trial_data <- reactiveValues(
     sessionID = NULL,
-    appStartTime = NULL
+    appStartTime = NULL,
+    practice_trial = 1,
+    practice_state = 'watch',
+    practice_data = NULL,
+    practice_data_solution = NULL,
+    practice_data_estimate = NULL
   )
   
   
@@ -116,8 +143,6 @@ server <- function(input, output, session) {
   output$sessionInfo <- renderText({
     as.character(session$token)
   })
-  
-  output
   
   ##### Informed Consent Logic #####
   
@@ -172,9 +197,88 @@ server <- function(input, output, session) {
   
   output$instructions <- renderUI({
     validate(need(input$kitNumber %in% c(1:21) | input$onlineParticipant == T, 'Please enter your kit number to continue'))
-    list(p('On the next page, you will be presented with a series of three practice graphs.'),
+    list(p('On the next page, you will be presented with a series of three practice graphs.',
+           'Your responses will not be saved, but you will be able to see the correct answers after you submit your responses.'),
       actionButton("startPractice", "Start Practice"))
   })
+  
+  
+  
+  ##### Practice Logic #####
+  
+  
+  #Generate practice graph
+  output$practiceGraph <- renderPlot({
+    trial_data$practice_data <- filter(practiceData, practiceID == min(trial_data$practice_trial,3))
+    
+    pracGraph <- Bar2D(trial_data$practice_data,
+          shape_order = 1)
+    
+    
+    trial_data$practice_data_estimate <- trial_data$practice_data %>% 
+      mutate(Height = ifelse(is.na(Identifier), NA, Height),
+             Height.save = Height,
+             Height.save = ifelse(is.na(Height.save), 0, Height.save),
+             HeightLabel = 100*Height/max(Height, na.rm = T),
+             Height = ifelse(Height == min(Height, na.rm = T), input$practiceEstimate, NA),
+             Label = ifelse(is.na(Height), NA, paste0('Your estimate: ', round(input$practiceEstimate,1))),
+             Height = ifelse(is.na(Height), 0, Height),
+             Height = Height * max(Height.save, na.rm = T)/100,
+             GroupOrderLabel = ifelse(is.na(Label), NA, GroupOrder))
+    
+    
+    
+    if(trial_data$practice_state == 'watch'){
+      pracGraph
+    } else {
+      #
+      pracGraph + 
+        geom_bar(mapping = aes(x = trial_data$practice_data_estimate$GroupOrder, 
+                               y = trial_data$practice_data_estimate$Height), 
+                 stat = 'identity', fill = 'red', alpha = 1/2,
+                 width = 0.8, na.rm = T) + 
+        geom_label(mapping = aes(x = trial_data$practice_data_estimate$GroupOrder, 
+                                y = 100, 
+                                label = trial_data$practice_data_estimate$Label),
+                   na.rm = T) + 
+        geom_segment(mapping = aes(x = trial_data$practice_data_estimate$GroupOrderLabel, 
+                                   xend = trial_data$practice_data_estimate$GroupOrderLabel, 
+                                   y = trial_data$practice_data_estimate$Height, yend = 95), 
+                     color = 'red', alpha = 1/2, na.rm = T) 
+    }
+
+    
+  })
+  
+  
+  output$practiceGraphUI <- renderUI({
+    list(plotOutput('practiceGraph'))
+  })
+  
+  
+  
+
+
+  #
+  observeEvent(input$submitPractice, {
+    if(trial_data$practice_trial == 3 & trial_data$practice_state == 'learn'){
+      updateNavbarPage(session, inputId = "navbar", "Demographics")
+      trial_data$practice_trial <- 1
+      
+    } else{
+      trial_data$practice_trial <- trial_data$practice_trial + 1
+      shinyjs::disable('estimatePractice')
+      shinyjs::hide('submitPractice')
+      trial_data$practice_state <- 'learn'
+    }
+  })
+  
+  observeEvent(input$practiceNext, {
+    
+  })
+  
+  
+  
   
   
 }
