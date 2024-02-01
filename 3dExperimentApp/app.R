@@ -173,14 +173,14 @@ server <- function(input, output, session) {
   
   output$informed_consent_button <- renderUI({
     validate(need(req(input$consent) != '', 'Please select an option to continue'))
-    list(actionButton("startExperiment", "Next page"))
+    list(actionButton("submitConsent", "Next page"))
 
   })
   
   
   
   
-  observeEvent(input$startExperiment, {
+  observeEvent(input$submitConsent, {
     
     #Move from informed consent to demographic page
     updateNavbarPage(session, inputId = "navbar", "Demographics")
@@ -197,7 +197,11 @@ server <- function(input, output, session) {
     validate(need(input$gender != "", 'Please enter your gender to continue'))
     validate(need(input$education != "", 'Please enter your education to continue'))
     validate(need(input$subjectZoo != "", 'Please enter your favorite zoo animal to continue'))
-    actionButton("startPractice", "Start Practice")
+    actionButton("toInstructions", "Next Page")
+  })
+  
+  observeEvent(input$toInstructions, {
+    updateNavbarPage(session, inputId = "navbar", "Instructions")
   })
   
   ##### Instructions Logic #####
@@ -219,6 +223,10 @@ server <- function(input, output, session) {
       actionButton("startPractice", "Start Practice"))
   })
   
+  
+  observeEvent(input$startPractice, {
+    updateNavbarPage(session, inputId = "navbar", "Practice")
+  })
   
   
   ##### Practice Logic #####
@@ -283,7 +291,7 @@ server <- function(input, output, session) {
   #     
   #   } else{
   #     trial_data$practice_trial <- trial_data$practice_trial + 1
-  #     shinyjs::disable('estimatePractice')
+  #     shinyjs::disable('practiceEstimate')
   #     shinyjs::hide('submitPractice')
   #     trial_data$practice_state <- 'learn'
   #   }
@@ -298,11 +306,14 @@ server <- function(input, output, session) {
   #Practice solution slider
   output$practiceSolutions <- renderUI({
     if(trial_data$practice_state == 'learn'){
-      list(h2('Solution'), sliderInput('practiceSolution', 'Correct Answer',
-                       min = 0, max = 100, value = 100*min(trial_data$practice_data_estimate$Height.save2, na.rm = T)/max(trial_data$practice_data_estimate$Height.save2, na.rm = T), step = 0.1, ticks = F),
-           actionButton('practiceNext', 'Next Graph'))
+      list(h2('Solution'), disabled(sliderInput('practiceSolution', 'Correct Answer',
+                       min = 0, max = 100, value = 100*min(trial_data$practice_data_estimate$Height.save2, na.rm = T)/max(trial_data$practice_data_estimate$Height.save2, na.rm = T), 
+                       step = 0.1, ticks = F)),
+           actionButton('practiceNext', 'Next'))
     }
   })
+  
+
   
   
   
@@ -310,24 +321,21 @@ server <- function(input, output, session) {
   observeEvent(input$submitPractice, {
     trial_data$practice_state <- 'learn'
     hide('submitPractice')
-    disable('estimatePractice')
     message(paste('Participant completed practice graph', trial_data$practice_trial))
   })
-  
+
   #Button to continue to next practice graph
   observeEvent(input$practiceNext, {
     if(trial_data$practice_trial == 3 & trial_data$practice_state == 'learn'){
       updateNavbarPage(session, inputId = "navbar", "Experiment")
       trial_data$practice_trial <- 1
-      trial_data$practice_state <- 'watch'
-      shinyjs::enable('estimatePractice')
-      shinyjs::show('submitPractice')
+      
     } else{
-      shinyjs::enable('estimatePractice')
-      shinyjs::show('submitPractice')
-      trial_data$practice_state <- 'watch'
       trial_data$practice_trial <- trial_data$practice_trial + 1
     }
+    
+    trial_data$practice_state <- 'watch'
+    shinyjs::show('submitPractice')
   })
   
   
