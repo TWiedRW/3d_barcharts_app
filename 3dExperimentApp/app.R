@@ -1,5 +1,6 @@
 
 library(shiny)
+library(shinyjs)
 source('R/plot-code.R')
 graphData <- read.csv('Data/graphData.csv')
 printedKitInfo <- read.csv('Data/printedKitInfo.csv')
@@ -95,6 +96,7 @@ practice <- fluidPage(
   tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "styles.css")
   ),
+  useShinyjs(),
   sidebarLayout(
     sidebarPanel(
       h2('Practice'),
@@ -102,7 +104,8 @@ practice <- fluidPage(
                    c('Circle', 'Triangle'), selected = ''),
       sliderInput('practiceEstimate', 'If the larger marked bar is 100 units tall, how tall is the smaller marked bar?',
                   min = 0, max = 100, value = 50, step = 0.1, ticks = F),
-      actionButton('submitPractice', 'Submit')
+      actionButton('submitPractice', 'Submit'),
+      uiOutput('practiceSolutions')
       
     ),
     mainPanel(
@@ -110,6 +113,19 @@ practice <- fluidPage(
     )
   )
 )
+
+##### Experiment page #####
+
+experiment <- fluidPage(
+  h2('Experiment'),
+  p('The experiment is about to begin.'),
+  actionButton('startExperiment', 'Start Experiment')
+)
+
+
+
+
+
 
 
 ##### UI Logic #####
@@ -120,6 +136,7 @@ ui <- navbarPage(
   tabPanel("Demographics", demographic),
   tabPanel("Instructions", instructions),
   tabPanel("Practice", practice),
+  tabPanel("Experiment", experiment),
   collapsible = TRUE
 )
 
@@ -207,18 +224,18 @@ server <- function(input, output, session) {
   ##### Practice Logic #####
   
   
-  #Generate practice graph
+  #Generate practice graph and solution
   output$practiceGraph <- renderPlot({
     trial_data$practice_data <- filter(practiceData, practiceID == min(trial_data$practice_trial,3))
     
     pracGraph <- Bar2D(trial_data$practice_data,
           shape_order = 1)
     
-    
     trial_data$practice_data_estimate <- trial_data$practice_data %>% 
       mutate(Height = ifelse(is.na(Identifier), NA, Height),
              Height.save = Height,
              Height.save = ifelse(is.na(Height.save), 0, Height.save),
+             Height.save2 = Height,
              HeightLabel = 100*Height/max(Height, na.rm = T),
              Height = ifelse(Height == min(Height, na.rm = T), input$practiceEstimate, NA),
              Label = ifelse(is.na(Height), NA, paste0('Your estimate: ', round(input$practiceEstimate,1))),
@@ -231,7 +248,7 @@ server <- function(input, output, session) {
     if(trial_data$practice_state == 'watch'){
       pracGraph
     } else {
-      #
+      #Add estimated bar to graph
       pracGraph + 
         geom_bar(mapping = aes(x = trial_data$practice_data_estimate$GroupOrder, 
                                y = trial_data$practice_data_estimate$Height), 
@@ -246,13 +263,12 @@ server <- function(input, output, session) {
                                    y = trial_data$practice_data_estimate$Height, yend = 95), 
                      color = 'red', alpha = 1/2, na.rm = T) 
     }
-
-    
   })
   
   
+  # Render plot
   output$practiceGraphUI <- renderUI({
-    list(plotOutput('practiceGraph'))
+    list(plotOutput('practiceGraph', width = '13cm', height = '9.5cm'))
   })
   
   
@@ -260,23 +276,59 @@ server <- function(input, output, session) {
 
 
   #
-  observeEvent(input$submitPractice, {
-    if(trial_data$practice_trial == 3 & trial_data$practice_state == 'learn'){
-      updateNavbarPage(session, inputId = "navbar", "Demographics")
-      trial_data$practice_trial <- 1
-      
-    } else{
-      trial_data$practice_trial <- trial_data$practice_trial + 1
-      shinyjs::disable('estimatePractice')
-      shinyjs::hide('submitPractice')
-      trial_data$practice_state <- 'learn'
+  # observeEvent(input$submitPractice, {
+  #   if(trial_data$practice_trial == 3 & trial_data$practice_state == 'learn'){
+  #     updateNavbarPage(session, inputId = "navbar", "Demographics")
+  #     trial_data$practice_trial <- 1
+  #     
+  #   } else{
+  #     trial_data$practice_trial <- trial_data$practice_trial + 1
+  #     shinyjs::disable('estimatePractice')
+  #     shinyjs::hide('submitPractice')
+  #     trial_data$practice_state <- 'learn'
+  #   }
+  # })
+  # 
+  # observeEvent(input$practiceNext, {
+  #   
+  # })
+  
+  
+  
+  #Practice solution slider
+  output$practiceSolutions <- renderUI({
+    if(trial_data$practice_state == 'learn'){
+      list(h2('Solution'), sliderInput('practiceSolution', 'Correct Answer',
+                       min = 0, max = 100, value = 100*min(trial_data$practice_data_estimate$Height.save2, na.rm = T)/max(trial_data$practice_data_estimate$Height.save2, na.rm = T), step = 0.1, ticks = F),
+           actionButton('practiceNext', 'Next Graph'))
     }
   })
   
-  observeEvent(input$practiceNext, {
-    
+  
+  
+  #Button to submit practice estimate
+  observeEvent(input$submitPractice, {
+    trial_data$practice_state <- 'learn'
+    hide('submitPractice')
+    disable('estimatePractice')
+    message(paste('Participant completed practice graph', trial_data$practice_trial))
   })
   
+  #Button to continue to next practice graph
+  observeEvent(input$practiceNext, {
+    if(trial_data$practice_trial == 3 & trial_data$practice_state == 'learn'){
+      updateNavbarPage(session, inputId = "navbar", "Experiment")
+      trial_data$practice_trial <- 1
+      trial_data$practice_state <- 'watch'
+      shinyjs::enable('estimatePractice')
+      shinyjs::show('submitPractice')
+    } else{
+      shinyjs::enable('estimatePractice')
+      shinyjs::show('submitPractice')
+      trial_data$practice_state <- 'watch'
+      trial_data$practice_trial <- trial_data$practice_trial + 1
+    }
+  })
   
   
   
