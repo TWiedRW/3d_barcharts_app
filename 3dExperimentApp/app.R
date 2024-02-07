@@ -47,20 +47,20 @@ demographic <- fluidPage(
     sidebarPanel(
       h2('Demographic Information'),
       p('Please select the demographic information that best describes you.'),
-      radioButtons('age', 'Age', 
-                  c("Under 19", "19-25", "26-30", "31-35", "36-40", "41-45", "46-50", "51-55", "56-60", "Over 60", "Prefer not to answer"),
-                  selected = ''),
-      radioButtons('gender', 'Gender Identity',
-                   c('Male', 'Female', 'Variant/Nonconforming', 'Prefer not to answer'),
-                   selected = ''),
-      radioButtons('education', 'Highest Education Level',
-                   choices = c("High School or Less",
+      selectizeInput('age', 'Age', 
+                  c('',"Under 19", "19-25", "26-30", "31-35", "36-40", "41-45", "46-50", "51-55", "56-60", "Over 60", "Prefer not to answer"),
+                  selected = NULL),
+      selectizeInput('gender', 'Gender Identity',
+                   c('','Male', 'Female', 'Variant/Nonconforming', 'Prefer not to answer'),
+                   selected = NULL),
+      selectizeInput('education', 'Highest Education Level',
+                   choices = c("","High School or Less",
                                "Some Undergraduate Courses",
                                "Undergraduate Degree",
                                "Some Graduate Courses",
                                "Graduate Degree",
                                "Prefer not to answer"),
-                   selected = '')
+                   selected = NULL)
     ),
     mainPanel(
       h2('Participant Identifier'),
@@ -149,6 +149,10 @@ experiment <- fluidPage(
                    c('Circle', 'Triangle'), selected = ''),
       sliderInput('expEstimate', 'If the larger marked bar is 100 units tall, how tall is the smaller marked bar?',
                   min = 0, max = 100, value = 50, step = 0.1, ticks = F),
+      conditionalPanel(
+        condition = 'input.consent == "FALSE"',
+        helpText('Demo Mode: Because you did not agree to participate in the experiment, your data will not be saved.')
+      ),
       actionButton('submitExp', 'Submit')
       
     ),
@@ -212,20 +216,25 @@ ui <- navbarPage(
 server <- function(input, output, session) {
 
   trial_data <- reactiveValues(
-    sessionID = NULL,                      #Unique shiny token
-    appStartTime = NULL,                   #Time app started
-    practice_trial = 1,                    #Current practice trial
-    practice_state = 'watch',              #State of practice trial
-    practice_data = NULL,                  #Data for current practice trial
-    practice_data_smaller = NULL,          #Correct qualitative answer for current practice trial
-    practice_data_solution = NULL,         #Correct quantitative answer for current practice trial
-    practice_data_estimate = NULL,         #Participant estimate for current practice trial
-    exp_kit = NULL,                        #Kit number (dbl)
-    exp_lineup = NULL,                     #Lineup of trials (df)
-    exp_trial = NULL,                      #Current trial number (dbl)
-    exp_trial_data = NULL,                 #Data for current trial (df),
-    exp_plot_type = NULL,                  #Type of plot for current trial (2dd, 3dd, 3dp, 3ds)
-    graphTitle = NULL                      #Title of current graph
+    sessionID = session$token,              #Unique shiny token
+    appStartTime = Sys.time(),              #Time app started
+    practice_trial = 1,                     #Current practice trial
+    practice_state = 'watch',               #State of practice trial
+    practice_data = NULL,                   #Data for current practice trial
+    practice_start_time = NULL,             #Starting time for practice trials
+    practice_end_time = NULL,               #Ending time for practice trials
+    practice_data_smaller = NULL,           #Correct qualitative answer for current practice trial
+    practice_data_solution = NULL,          #Correct quantitative answer for current practice trial
+    practice_data_estimate = NULL,          #Participant estimate for current practice trial
+    exp_kit = NULL,                         #Kit number (dbl)
+    exp_lineup = NULL,                      #Lineup of trials (df)
+    exp_trial = NULL,                       #Current trial number (dbl)
+    exp_trial_data = NULL,                  #Data for current trial (df),
+    exp_plot_type = NULL,                   #Type of plot for current trial (2dd, 3dd, 3dp, 3ds)
+    graphTitle = NULL,                      #Title of current graph
+    exp_start_time = NULL,                  #Time the experiment was started
+    exp_plot_start_time = NULL,             #Time the current plot was displayed
+    exp_plot_end_time = NULL,               #Time the current plot was submitted
   )
   
   output$sessionInfo <- renderText({
@@ -287,6 +296,7 @@ server <- function(input, output, session) {
   #Update kit value to 'Online' if online participant is checked
   observeEvent(input$startPractice, {
     updateNavbarPage(session, inputId = "navbar", "Practice")
+    trial_data$practice_start_time <- Sys.time()
   })
   
   
@@ -384,6 +394,7 @@ server <- function(input, output, session) {
     if(trial_data$practice_trial == 3 & trial_data$practice_state == 'learn'){
       trial_data$practice_trial <- 1
       updateNavbarPage(session, inputId = "navbar", "Setup")
+      practice_end_time <- Sys.time()
     } else{
       trial_data$practice_trial <- trial_data$practice_trial + 1
     }
@@ -416,6 +427,8 @@ server <- function(input, output, session) {
     trial_data$exp_kit <- input$kitNumber
     trial_data$exp_lineup <- create_lineup(trial_data$exp_kit)
     trial_data$exp_trial <- 1
+    trial_data$exp_start_time <- Sys.time()
+    trial_data$exp_plot_start_time <- Sys.time()
     updateNavbarPage(session, inputId = "navbar", "Experiment")
   })
   
@@ -454,6 +467,7 @@ server <- function(input, output, session) {
     message(sprintf('Participant completed experiment graph %d (%s)', 
                     trial_data$exp_trial,
                     trial_data$exp_plot_type))
+    trial_data$exp_trial_end_time <- Sys.time()
     trial_data$exp_trial <- trial_data$exp_trial + 1
     updateSliderInput(session, "expEstimate", value = 50)
     trial_data$exp_plot_type <- 'Refresh'
@@ -493,9 +507,10 @@ server <- function(input, output, session) {
   output$bar3dp <- renderPlot({
     validate(need(as.character(trial_data$exp_trial_data$plot) == '3dPrint', 'Error: Wrong plot type for this graph'))
     ggplot(mapping = aes(x = 0, y = 0)) + 
-      geom_label(label = 'Please select a 3D printed graph from your kit.')
+      geom_text(label = 'Please select a 3D printed graph from your kit.',
+                 size = 8) + 
+      theme_void()
   })
-  
   
   
   #Generate 3d static plots
