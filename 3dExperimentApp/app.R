@@ -1,6 +1,7 @@
 
 library(shiny)
 library(shinyjs)
+library(rgl)
 source('R/plot-code.R')
 graphData <- read.csv('Data/graphData.csv')
 printedKitInfo <- read.csv('Data/printedKitInfo.csv')
@@ -8,6 +9,7 @@ practiceData <- read.csv('Data/practiceData.csv')
 source('R/create_lineup.R')
 source('R/generate_code.R')
 
+stl_files <- list.files('Plots/stl_files', pattern = '.stl', full.names = T)
 
 ##### UI Pages #####
 
@@ -108,7 +110,11 @@ practice <- fluidPage(
       
     ),
     mainPanel(
-      uiOutput('practiceGraphUI')
+      uiOutput('practiceGraphUI'),
+      conditionalPanel(
+        condition = "input.subjectZoo == 'devmode'",
+        tableOutput('practiceTable')
+      )
     )
   )
 )
@@ -144,7 +150,7 @@ experiment <- fluidPage(
       
     ),
     mainPanel(
-      # uiOutput('expGraphUI')
+      uiOutput('expGraphDisplay')
     )
   )
 )
@@ -199,18 +205,20 @@ ui <- navbarPage(
 server <- function(input, output, session) {
 
   trial_data <- reactiveValues(
-    sessionID = NULL,
-    appStartTime = NULL,
-    practice_trial = 1,
-    practice_state = 'watch',
-    practice_data = NULL,
-    practice_data_solution = NULL,
-    practice_data_estimate = NULL,
-    exp_kit = NULL,
-    exp_lineup = NULL,
-    exp_trial = NULL,
-    exp_trial_data = NULL,
-    graphTitle = NULL
+    sessionID = NULL,                      #Unique shiny token
+    appStartTime = NULL,                   #Time app started
+    practice_trial = 1,                    #Current practice trial
+    practice_state = 'watch',              #State of practice trial
+    practice_data = NULL,                  #Data for current practice trial
+    practice_data_smaller = NULL,          #Correct qualitative answer for current practice trial
+    practice_data_solution = NULL,         #Correct quantitative answer for current practice trial
+    practice_data_estimate = NULL,         #Participant estimate for current practice trial
+    exp_kit = NULL,                        #Kit number (dbl)
+    exp_lineup = NULL,                     #Lineup of trials (df)
+    exp_trial = NULL,                      #Current trial number (dbl)
+    exp_trial_data = NULL,                 #Data for current trial (df),
+    exp_plot_type = NULL,                  #Type of plot for current trial (2dd, 3dd, 3dp, 3ds)
+    graphTitle = NULL                      #Title of current graph
   )
   
   output$sessionInfo <- renderText({
@@ -285,7 +293,10 @@ server <- function(input, output, session) {
              Label = ifelse(is.na(Height), NA, paste0('Your estimate: ', round(input$practiceEstimate,1))),
              Height = ifelse(is.na(Height), 0, Height),
              Height = Height * max(Height.save, na.rm = T)/100,
-             GroupOrderLabel = ifelse(is.na(Label), NA, GroupOrder))
+             GroupOrderLabel = ifelse(is.na(Label), NA, GroupOrder),
+             Smaller = ifelse(IDchr == '▲', 'Triangle', 
+                              ifelse(IDchr == '●', 'Circle', NA)),
+             Smaller = ifelse(!is.na(GroupOrderLabel), Smaller, NA))
     
     
     
@@ -306,6 +317,7 @@ server <- function(input, output, session) {
                                    xend = trial_data$practice_data_estimate$GroupOrderLabel, 
                                    y = trial_data$practice_data_estimate$Height, yend = 95), 
                      color = 'red', alpha = 1/2, na.rm = T) 
+      
     }
   })
   
@@ -318,11 +330,19 @@ server <- function(input, output, session) {
   #Practice solution slider
   output$practiceSolutions <- renderUI({
     if(trial_data$practice_state == 'learn'){
-      list(h2('Solution'), disabled(sliderInput('practiceSolution', 'Correct Answer',
+      list(h2('Solution'), 
+           disabled(radioButtons('practiceSolutionRadio', 'Correct Answer',
+                   c('Circle', 'Triangle'), selected = '')),
+           disabled(sliderInput('practiceSolutionSlider', 'Correct Answer',
                        min = 0, max = 100, value = 100*min(trial_data$practice_data_estimate$Height.save2, na.rm = T)/max(trial_data$practice_data_estimate$Height.save2, na.rm = T), 
                        step = 0.1, ticks = F)),
+           helpText('You can adjust the estimate slider to compare your estimate to the correct answer.'),
            actionButton('practiceNext', 'Next'))
     }
+  })
+  
+  output$practiceTable <- renderTable({
+    trial_data$practice_data_estimate
   })
   
   #Practice graph title
@@ -330,12 +350,15 @@ server <- function(input, output, session) {
     list(h2(paste('Graph', as.character(trial_data$practice_trial), 'of 3')))
   })
   
-  
+  output$practiceSolutionText <- renderText({
+    as.character(unique(trial_data$practice_data_estimate$Smaller))
+  })
   
   #Button to submit practice estimate
   observeEvent(input$submitPractice, {
     trial_data$practice_state <- 'learn'
     hide('submitPractice')
+    updateRadioButtons(session, "practiceSolutionRadio", selected = as.character(trial_data$practice_data_estimate$Smaller[!is.na(trial_data$practice_data_estimate$Smaller)]))
     message(paste('Participant completed practice graph', trial_data$practice_trial))
   })
 
@@ -381,15 +404,27 @@ server <- function(input, output, session) {
   
   ##### Experiment Logic #####
   
+  #Update graph title
   output$expGraphTitle <- renderUI({
     trial_data$graphTitle <- paste('Graph', as.character(trial_data$exp_trial), 
                         'of', as.character(nrow(trial_data$exp_lineup)))
     list(h2(trial_data$graphTitle))
   })
   
-  # Button to submit experiment estimate, updates slide if 
+  
+  
+  #Button to submit experiment estimate
   observeEvent(input$submitExp, {
-    message(paste('Participant completed experiment graph', trial_data$exp_trial))
+
+    # message(paste0('Participant completed experiment graph ',
+    #                (trial_data$exp_trial), ' (',
+    #                as.character((trial_data$exp_trial_data$plot))),  ')')
+    
+    # print(sprintf('Participant completed experiment graph %d (%s)', 
+    #               trial_data$exp_trial,
+    #               trial_data$exp_plot_type))
+    
+    # message('Participant completed an experiment graph')
     trial_data$exp_trial <- trial_data$exp_trial + 1
     updateSliderInput(session, "expEstimate", value = 50)
     if(trial_data$exp_trial > nrow(trial_data$exp_lineup)){
@@ -398,14 +433,85 @@ server <- function(input, output, session) {
     }
   })
   
+
+  
+  #Generate 2d plots
+  output$bar2d <- renderPlot({
+    validate(need(as.character(trial_data$exp_trial_data$plot) == '2dDigital', 'Error: Wrong plot type for this graph'))
+    Bar2D(trial_data$exp_trial_data,
+          shape_order = 1)
+  })
   
   
+  
+  #Generate 3d digital plots
+  output$bar3dd <- renderPlot({
+    # validate(need(as.character(trial_data$exp_trial_data$plot) == '3dDigital', 'Error: Wrong plot type for this graph'))
+    try(close3d())
+    Bar3D(stl_files[trial_data$exp_trial],
+          color = 'blue')
+    rglwidget()
+    
+  })
+  
+  
+  
+  
+  #Generate 3d printed plots
+  output$bar3dp <- renderPlot({
+    validate(need(as.character(trial_data$exp_trial_data$plot) == '3dPrint', 'Error: Wrong plot type for this graph'))
+    Bar2D(trial_data$exp_trial_data,
+          shape_order = 1)
+  })
+  
+  
+  
+  #Generate 3d static plots
+  output$bar3ds <- renderPlot({
+    validate(need(as.character(trial_data$exp_trial_data$plot) == '3dStatic', 'Error: Wrong plot type for this graph'))
+    Bar2D(trial_data$exp_trial_data,
+          shape_order = 1)
+  })
+  
+  
+  
+  
+  #---------------------------------------------------------------------------#
   
   #Display experiment plot
-  output$expGraphDisplay <- renderPlot({
-    trial_data$
-    # Bar2D(trial_data$exp_lineup, shape_order = 1)
+  output$expGraphDisplay <- renderUI({
+  
+    #Check that all conditions are met
+    validate(need(!is.null(trial_data$exp_kit), 'Error: No kit number selected'),
+             need(!is.null(trial_data$exp_lineup), 'Error: Trial lineup not created'),
+             need(!is.null(trial_data$exp_trial), 'Error: Trial number not set'))
+    
+    
+    #Subset lineup to current trial
+    trial_data$exp_trial_data <- filter(trial_data$exp_lineup, 
+                                        trial_order == trial_data$exp_trial) %>% 
+      left_join(graphData, by = 'fileID', relationship = 'many-to-many')
+    
+    #Lineup plot type
+    trial_data$exp_plot_type <- as.character(trial_data$exp_trial_data$plot)
+    
+    message(sprintf('Participant completed experiment graph %d', 
+                  # as.character(trial_data$sessionID), #this adds 10 messages for some weird reason
+                  trial_data$exp_trial))
+          
+    
+    #Render plot based on plot type
+    switch (as.character(unique(trial_data$exp_trial_data$plot)),
+            '2dDigital' = plotOutput('bar2d', width = '16.175cm', height = '9.5cm'),
+            '3dPrint' = plotOutput('bar3dp', width = '16.175cm', height = '9.5cm'),
+            '3dStatic'  = plotOutput('bar3ds', width = '16.175cm', height = '9.5cm'),
+            '3dDigital' = rglwidgetOutput('bar3dd')
+    )
+    
+    
   })
+  
+  #-------------------------------------------------------------------------#
   
   
   ##### Exit Logic #####
