@@ -8,3 +8,9 @@
 .irs-single {
   visibility: hidden;
 }
+
+.tab-content {
+  color: black;
+  margin-left: 10%;
+  margin-right: 10%;
+}
